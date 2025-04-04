@@ -1,32 +1,65 @@
 const fs = require('fs');
 const path = require('path');
 
+// Define base paths
+const srcDir = path.join(__dirname, 'src');
+const pagesDir = path.join(srcDir, 'pages');
+const componentsDir = path.join(srcDir, 'components');
+const outputDir = path.join(__dirname, 'dist');
+
 // Function to process <include> tags in the HTML content
-function processIncludes(html, baseDir) {
+// Looks for components within the componentsDir
+function processIncludes(html, baseComponentDir) {
   return html.replace(/<include\s+src="([^"]+)"\s*\/?>/g, (match, src) => {
-    const filePath = path.join(baseDir, src);
+    const filePath = path.join(baseComponentDir, src);
     try {
+      // Read the component file content
       return fs.readFileSync(filePath, 'utf8');
     } catch (err) {
-      console.warn(`Warning: Could not read ${filePath}`);
-      return "";
+      console.warn(`Warning: Could not read include file ${filePath}. Error: ${err.message}`);
+      return ""; // Return empty string if include fails
     }
   });
 }
 
-// Define paths for the input (src) and output (dist) files
-const inputPath = path.join(__dirname, 'src', 'index.html');
-const outputDir = path.join(__dirname, 'dist');
-const outputPath = path.join(outputDir, 'index.html');
-
-// Ensure the output directory exists
+// Ensure the output directory exists, create if it doesn't
 if (!fs.existsSync(outputDir)) {
-  fs.mkdirSync(outputDir);
+  fs.mkdirSync(outputDir, { recursive: true }); // Use recursive: true for safety
+  console.log(`Created output directory: ${outputDir}`);
+} else {
+    console.log(`Output directory already exists: ${outputDir}`);
 }
 
-// Read the source HTML file, process includes, and write the result
-const htmlContent = fs.readFileSync(inputPath, 'utf8');
-const processedHtml = processIncludes(htmlContent, path.join(__dirname, 'src'));
-fs.writeFileSync(outputPath, processedHtml, 'utf8');
+// Read all files from the pages directory
+try {
+  const files = fs.readdirSync(pagesDir);
 
-console.log(`Build completed. Output file: ${outputPath}`);
+  files.forEach(file => {
+    // Process only .html files
+    if (path.extname(file) === '.html') {
+      const inputFilePath = path.join(pagesDir, file);
+      const outputFilePath = path.join(outputDir, file);
+
+      console.log(`Processing ${inputFilePath}...`);
+
+      // Read the source HTML file
+      const htmlContent = fs.readFileSync(inputFilePath, 'utf8');
+
+      // Process includes, passing the components directory path
+      const processedHtml = processIncludes(htmlContent, componentsDir);
+
+      // Write the processed HTML to the output directory
+      fs.writeFileSync(outputFilePath, processedHtml, 'utf8');
+
+      console.log(` -> Output written to ${outputFilePath}`);
+    } else {
+        console.log(`Skipping non-html file: ${file}`);
+    }
+  });
+
+  console.log('\nBuild completed successfully!');
+
+} catch (err) {
+  console.error(`Error reading pages directory ${pagesDir}: ${err.message}`);
+  process.exit(1); // Exit script with error status
+}
