@@ -1,11 +1,16 @@
 {
-    "name": "static-site-generator",
-    "version": "1.0.0",
-    "description": "A lightweight static site generator with custom includes",
-    "main": "build.js",
-    "scripts": {
-      "build": "node build.js"
-    },
-    "author": "Your Name",
-    "license": "MIT"
+  "name": "static-site-generator",
+  "version": "1.0.0",
+  "description": "A lightweight static site generator with custom includes",
+  "main": "build.js",
+  "scripts": {
+    "build": "node build.js"
+  },
+  "author": "Your Name",
+  "license": "MIT",
+  "devDependencies": {
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.3"
   }
+}

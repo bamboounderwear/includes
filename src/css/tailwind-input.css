@@ -1,0 +1,11 @@
+/* File: src/css/tailwind-input.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* You can add custom base styles or component classes here if needed */
+/* For example:
+  body {
+    @apply font-sans antialiased;
+  }
+*/
