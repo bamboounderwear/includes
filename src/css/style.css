@@ -1,0 +1,23 @@
+body {
+    font-family: sans-serif;
+    margin: 2em;
+    background-color: #f0f0f0;
+  }
+  
+  header nav ul {
+    list-style: none;
+    padding: 0;
+  }
+  
+  header nav ul li {
+    display: inline-block;
+    margin-right: 1em;
+  }
+  
+  footer {
+    margin-top: 2em;
+    border-top: 1px solid #ccc;
+    padding-top: 1em;
+    font-size: 0.9em;
+    color: #555;
+  }
