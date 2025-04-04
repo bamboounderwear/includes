@@ -1,3 +1,4 @@
+// File: build.js
 const fs = require('fs');
 const path = require('path');
 const { performance } = require('perf_hooks'); // Added for timing
@@ -44,28 +45,53 @@ function parseAttributes(attrString) {
     return attributes;
 }
 
+// Updated function to support nested includes
 function processIncludes(html, baseComponentDir) {
     const includeRegex = /<include\s+src="([^"]+)"([^>]*)\/?>/g;
+    let processedHtml = html;
+    let includesFoundInPass;
+    let depth = 0; // Add depth counter for safety
+    const maxDepth = 10; // Set a maximum recursion depth
 
-    return html.replace(includeRegex, (match, src, attrsString) => {
-        const filePath = path.join(baseComponentDir, src);
-        try {
-            let componentContent = fs.readFileSync(filePath, 'utf8');
-            const attributes = parseAttributes(attrsString.trim());
-
-            // Replace placeholders like {{ variableName }}
-            componentContent = componentContent.replace(/{{\s*(\w+)\s*}}/g, (placeholderMatch, varName) => {
-                // Return the attribute value if found, otherwise return an empty string
-                return attributes[varName] || ''; // Changed this line
-            });
-
-            return componentContent;
-        } catch (err) {
-            console.warn(`Warning: Could not read or process include file ${filePath}. Error: ${err.message}`);
-            return ""; // Return empty string if include fails
+    // Keep processing includes as long as new ones are found and processed in a pass
+    do {
+        if (depth++ > maxDepth) {
+            console.error(`Error: Maximum include depth (${maxDepth}) exceeded. Check for circular includes.`);
+            // Return the HTML as-is to prevent infinite loop errors from halting the build entirely.
+            // Or you could choose to return an error string: return `<!-- ERROR: Maximum include depth exceeded -->`;
+            return processedHtml;
         }
-    });
+
+        includesFoundInPass = false; // Reset flag for this pass
+        processedHtml = processedHtml.replace(includeRegex, (match, src, attrsString) => {
+            // If we are executing this callback, it means an include tag was found
+            includesFoundInPass = true; // Mark that we found and processed an include in this pass
+            const filePath = path.join(baseComponentDir, src);
+            try {
+                let componentContent = fs.readFileSync(filePath, 'utf8');
+                const attributes = parseAttributes(attrsString.trim());
+
+                // Replace placeholders like {{ variableName }} within the component content
+                componentContent = componentContent.replace(/{{\s*(\w+)\s*}}/g, (placeholderMatch, varName) => {
+                    return attributes[varName] || ''; // Use attribute value or empty string
+                });
+
+                // Return the processed component content, which might contain more include tags
+                return componentContent;
+
+            } catch (err) {
+                console.warn(`Warning: Could not read or process include file ${filePath}. Error: ${err.message}`);
+                // Return an empty string or an error comment instead of the tag
+                return `<!-- Include Error: ${src} not found or processed -->`;
+            }
+        });
+        // Loop continues if an include was successfully processed in this pass,
+        // as the inserted content might contain further includes.
+    } while (includesFoundInPass);
+
+    return processedHtml;
 }
+
 
 // --- Build Process ---
 
@@ -118,7 +144,7 @@ try {
                     // Read the source HTML file
                     const htmlContent = fs.readFileSync(inputFilePath, 'utf8');
 
-                    // Process includes and variables, passing the components directory path
+                    // Process includes (now recursively) and variables, passing the components directory path
                     const processedHtml = processIncludes(htmlContent, config.componentsDir);
 
                     // Write the processed HTML to the output directory
