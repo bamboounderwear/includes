@@ -1,7 +1,7 @@
 // File: build.js
 const fs = require('fs');
 const path = require('path');
-const { performance } = require('perf_hooks'); // Added for timing
+const { performance } = require('perf_hooks');
 
 // --- Configuration ---
 const config = {
@@ -9,11 +9,20 @@ const config = {
     outputDir: path.join(__dirname, 'dist'),
     pagesDir: path.join(__dirname, 'src', 'pages'),
     componentsDir: path.join(__dirname, 'src', 'components'),
-    assetsBaseDir: path.join(__dirname, 'src'), // Base directory where asset folders reside
-    assetFolders: ['css', 'js', 'images'] // Folders to copy directly
+    assetsBaseDir: path.join(__dirname, 'src'),
+    assetFolders: ['css', 'js', 'images']
 };
 
 // --- Helper Functions ---
+
+function ensureDirectoryExistence(filePath) {
+    const dirname = path.dirname(filePath);
+    if (fs.existsSync(dirname)) {
+      return true;
+    }
+    ensureDirectoryExistence(dirname);
+    fs.mkdirSync(dirname);
+}
 
 function copyDirectoryRecursive(source, destination) {
     if (!fs.existsSync(source)) {
@@ -45,60 +54,93 @@ function parseAttributes(attrString) {
     return attributes;
 }
 
-// Updated function to support nested includes
 function processIncludes(html, baseComponentDir) {
     const includeRegex = /<include\s+src="([^"]+)"([^>]*)\/?>/g;
     let processedHtml = html;
     let includesFoundInPass;
-    let depth = 0; // Add depth counter for safety
-    const maxDepth = 10; // Set a maximum recursion depth
+    let depth = 0;
+    const maxDepth = 10;
 
-    // Keep processing includes as long as new ones are found and processed in a pass
     do {
         if (depth++ > maxDepth) {
             console.error(`Error: Maximum include depth (${maxDepth}) exceeded. Check for circular includes.`);
-            // Return the HTML as-is to prevent infinite loop errors from halting the build entirely.
-            // Or you could choose to return an error string: return `<!-- ERROR: Maximum include depth exceeded -->`;
             return processedHtml;
         }
-
-        includesFoundInPass = false; // Reset flag for this pass
+        includesFoundInPass = false;
         processedHtml = processedHtml.replace(includeRegex, (match, src, attrsString) => {
-            // If we are executing this callback, it means an include tag was found
-            includesFoundInPass = true; // Mark that we found and processed an include in this pass
-            const filePath = path.join(baseComponentDir, src);
+            includesFoundInPass = true;
+            // Adjust path resolution: Look relative to componentsDir *first*
+            let filePath = path.join(baseComponentDir, src);
+
+            // If not found in componentsDir, consider if it's relative to the *current* file being processed
+            // NOTE: This adds complexity. For now, keeping includes relative to componentsDir only.
+            // Add more sophisticated path logic here if needed in the future.
+
             try {
                 let componentContent = fs.readFileSync(filePath, 'utf8');
                 const attributes = parseAttributes(attrsString.trim());
-
-                // Replace placeholders like {{ variableName }} within the component content
                 componentContent = componentContent.replace(/{{\s*(\w+)\s*}}/g, (placeholderMatch, varName) => {
-                    return attributes[varName] || ''; // Use attribute value or empty string
+                    return attributes[varName] || '';
                 });
-
-                // Return the processed component content, which might contain more include tags
                 return componentContent;
-
             } catch (err) {
                 console.warn(`Warning: Could not read or process include file ${filePath}. Error: ${err.message}`);
-                // Return an empty string or an error comment instead of the tag
                 return `<!-- Include Error: ${src} not found or processed -->`;
             }
         });
-        // Loop continues if an include was successfully processed in this pass,
-        // as the inserted content might contain further includes.
     } while (includesFoundInPass);
 
     return processedHtml;
 }
 
+// --- Recursive Page Processing Function ---
+function processDirectory(inputDir, outputDir) {
+    const entries = fs.readdirSync(inputDir, { withFileTypes: true });
+
+    entries.forEach(entry => {
+        const inputPath = path.join(inputDir, entry.name);
+        const outputPath = path.join(outputDir, entry.name);
+
+        if (entry.isDirectory()) {
+            // Create corresponding directory in dist and recurse
+            fs.mkdirSync(outputPath, { recursive: true });
+            processDirectory(inputPath, outputPath);
+        } else if (entry.isFile()) {
+            // Process or copy files
+            if (path.extname(entry.name) === '.html') {
+                console.log(`Processing ${inputPath}...`);
+                try {
+                    const htmlContent = fs.readFileSync(inputPath, 'utf8');
+                    // Process includes relative to the main components directory
+                    const processedHtml = processIncludes(htmlContent, config.componentsDir);
+                    ensureDirectoryExistence(outputPath); // Ensure parent dir exists
+                    fs.writeFileSync(outputPath, processedHtml, 'utf8');
+                    console.log(` -> Output written to ${outputPath}`);
+                } catch (err) {
+                    console.error(`Error processing file ${inputPath}: ${err.message}`);
+                }
+            } else {
+                // Copy non-HTML files directly
+                console.log(`Copying non-HTML file: ${inputPath}...`);
+                try {
+                    ensureDirectoryExistence(outputPath); // Ensure parent dir exists
+                    fs.copyFileSync(inputPath, outputPath);
+                    console.log(` -> Copied to ${outputPath}`);
+                } catch (copyErr) {
+                    console.error(`Error copying file ${inputPath} to ${outputPath}: ${copyErr.message}`);
+                }
+            }
+        }
+    });
+}
+
 
 // --- Build Process ---
 
-const startTime = performance.now(); // Start timer
+const startTime = performance.now();
 console.log('Starting build process...');
 
-// 1. Clean the output directory
+// 1. Clean output directory
 console.log(`Cleaning output directory: ${config.outputDir}...`);
 if (fs.existsSync(config.outputDir)) {
     fs.rmSync(config.outputDir, { recursive: true, force: true });
@@ -107,7 +149,7 @@ if (fs.existsSync(config.outputDir)) {
     console.log(' -> Output directory does not exist, no cleaning needed.');
 }
 
-// 2. Recreate the output directory
+// 2. Recreate output directory
 fs.mkdirSync(config.outputDir, { recursive: true });
 console.log(`Created output directory: ${config.outputDir}`);
 
@@ -116,7 +158,7 @@ console.log('Copying static assets...');
 config.assetFolders.forEach(folder => {
     const sourcePath = path.join(config.assetsBaseDir, folder);
     const destPath = path.join(config.outputDir, folder);
-    if (fs.existsSync(sourcePath)) { // Check if asset folder exists before copying
+    if (fs.existsSync(sourcePath)) {
         console.log(` -> Copying ${folder}...`);
         copyDirectoryRecursive(sourcePath, destPath);
     } else {
@@ -125,57 +167,17 @@ config.assetFolders.forEach(folder => {
 });
 console.log(' -> Static assets copied.');
 
-
-// 4. Process files in pages directory
-console.log(`Processing pages from ${config.pagesDir}...`);
+// 4. Process pages recursively
+console.log(`Processing pages recursively from ${config.pagesDir}...`);
 try {
-    const files = fs.readdirSync(config.pagesDir);
+    // Start the recursive processing from the base pages directory
+    processDirectory(config.pagesDir, config.outputDir);
 
-    files.forEach(file => {
-        const inputFilePath = path.join(config.pagesDir, file);
-        const outputFilePath = path.join(config.outputDir, file); // Output directly into dist
-
-        // Check if it's a file before processing
-        if (fs.statSync(inputFilePath).isFile()) {
-            // Process only .html files
-            if (path.extname(file) === '.html') {
-                console.log(`Processing ${inputFilePath}...`);
-                try {
-                    // Read the source HTML file
-                    const htmlContent = fs.readFileSync(inputFilePath, 'utf8');
-
-                    // Process includes (now recursively) and variables, passing the components directory path
-                    const processedHtml = processIncludes(htmlContent, config.componentsDir);
-
-                    // Write the processed HTML to the output directory
-                    fs.writeFileSync(outputFilePath, processedHtml, 'utf8');
-                    console.log(` -> Output written to ${outputFilePath}`);
-
-                } catch (writeErr) {
-                    console.error(`Error writing file ${outputFilePath}: ${writeErr.message}`);
-                }
-
-            } else {
-                // Copy non-HTML files directly
-                console.log(`Copying non-HTML file: ${file}...`);
-                try {
-                    fs.copyFileSync(inputFilePath, outputFilePath);
-                    console.log(` -> Copied to ${outputFilePath}`);
-                } catch (copyErr) {
-                    console.error(`Error copying file ${inputFilePath} to ${outputFilePath}: ${copyErr.message}`);
-                }
-            }
-        } else {
-             console.log(`Skipping directory: ${file}`); // Skip subdirectories within pages
-        }
-    });
-
-    const endTime = performance.now(); // End timer
-    const duration = ((endTime - startTime) / 1000).toFixed(2); // Calculate duration in seconds
-
+    const endTime = performance.now();
+    const duration = ((endTime - startTime) / 1000).toFixed(2);
     console.log(`\nBuild completed successfully in ${duration} seconds!`);
 
 } catch (err) {
-    console.error(`Error reading pages directory ${config.pagesDir}: ${err.message}`);
-    process.exit(1); // Exit script with error status
+    console.error(`Error during page processing: ${err.message}`);
+    process.exit(1);
 }
