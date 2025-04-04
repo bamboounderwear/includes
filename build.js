@@ -99,7 +99,6 @@ assetFolders.forEach(folder => {
 console.log(' -> Static assets copied.');
 
 
-// 4. Process HTML pages from the 'pages' directory
 console.log('Processing HTML pages...');
 try {
   const files = fs.readdirSync(pagesDir);
