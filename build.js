@@ -1,39 +1,39 @@
 const fs = require('fs');
 const path = require('path');
+const { performance } = require('perf_hooks'); // Added for timing
 
-// Define base paths
-const srcDir = path.join(__dirname, 'src');
-const pagesDir = path.join(srcDir, 'pages');
-const componentsDir = path.join(srcDir, 'components');
-const assetsDir = srcDir; // Assuming assets (css, js, images) are directly in src subfolders
-const outputDir = path.join(__dirname, 'dist');
+// --- Configuration ---
+const config = {
+    srcDir: path.join(__dirname, 'src'),
+    outputDir: path.join(__dirname, 'dist'),
+    pagesDir: path.join(__dirname, 'src', 'pages'),
+    componentsDir: path.join(__dirname, 'src', 'components'),
+    assetsBaseDir: path.join(__dirname, 'src'), // Base directory where asset folders reside
+    assetFolders: ['css', 'js', 'images'] // Folders to copy directly
+};
 
 // --- Helper Functions ---
 
-// Function to recursively copy a directory
 function copyDirectoryRecursive(source, destination) {
-  if (!fs.existsSync(source)) {
-    console.warn(`Warning: Asset source directory ${source} does not exist. Skipping.`);
-    return;
-  }
-  fs.mkdirSync(destination, { recursive: true });
-  const entries = fs.readdirSync(source, { withFileTypes: true });
-
-  for (const entry of entries) {
-    const srcPath = path.join(source, entry.name);
-    const destPath = path.join(destination, entry.name);
-
-    if (entry.isDirectory()) {
-      copyDirectoryRecursive(srcPath, destPath);
-    } else {
-      fs.copyFileSync(srcPath, destPath);
-      // console.log(` -> Copied asset: ${destPath}`); // Optional: verbose logging
+    if (!fs.existsSync(source)) {
+        console.warn(`Warning: Asset source directory ${source} does not exist. Skipping.`);
+        return;
     }
-  }
+    fs.mkdirSync(destination, { recursive: true });
+    const entries = fs.readdirSync(source, { withFileTypes: true });
+
+    for (const entry of entries) {
+        const srcPath = path.join(source, entry.name);
+        const destPath = path.join(destination, entry.name);
+
+        if (entry.isDirectory()) {
+            copyDirectoryRecursive(srcPath, destPath);
+        } else {
+            fs.copyFileSync(srcPath, destPath);
+        }
+    }
 }
 
-// Function to parse attributes from the include tag string
-// Example: `title="About Us" class="header"` -> `{ title: 'About Us', class: 'header' }`
 function parseAttributes(attrString) {
     const attributes = {};
     const regex = /(\w+)="([^"]+)"/g;
@@ -44,10 +44,7 @@ function parseAttributes(attrString) {
     return attributes;
 }
 
-// Function to process <include> tags and variable placeholders
 function processIncludes(html, baseComponentDir) {
-    // Regex to find <include src="..." ... /> tags
-    // It captures the src attribute and any other attributes
     const includeRegex = /<include\s+src="([^"]+)"([^>]*)\/?>/g;
 
     return html.replace(includeRegex, (match, src, attrsString) => {
@@ -58,9 +55,8 @@ function processIncludes(html, baseComponentDir) {
 
             // Replace placeholders like {{ variableName }}
             componentContent = componentContent.replace(/{{\s*(\w+)\s*}}/g, (placeholderMatch, varName) => {
-                // Return the attribute value if found, otherwise return the placeholder itself (or empty string)
-                return attributes[varName] !== undefined ? attributes[varName] : placeholderMatch;
-                // Alternative: return '' if var not found: return attributes[varName] || '';
+                // Return the attribute value if found, otherwise return an empty string
+                return attributes[varName] || ''; // Changed this line
             });
 
             return componentContent;
@@ -71,64 +67,89 @@ function processIncludes(html, baseComponentDir) {
     });
 }
 
-
 // --- Build Process ---
 
+const startTime = performance.now(); // Start timer
+console.log('Starting build process...');
+
 // 1. Clean the output directory
-console.log(`Cleaning output directory: ${outputDir}...`);
-if (fs.existsSync(outputDir)) {
-  fs.rmSync(outputDir, { recursive: true, force: true });
-  console.log(' -> Output directory cleaned.');
+console.log(`Cleaning output directory: ${config.outputDir}...`);
+if (fs.existsSync(config.outputDir)) {
+    fs.rmSync(config.outputDir, { recursive: true, force: true });
+    console.log(' -> Output directory cleaned.');
 } else {
     console.log(' -> Output directory does not exist, no cleaning needed.');
 }
 
 // 2. Recreate the output directory
-fs.mkdirSync(outputDir, { recursive: true });
-console.log(`Created output directory: ${outputDir}`);
+fs.mkdirSync(config.outputDir, { recursive: true });
+console.log(`Created output directory: ${config.outputDir}`);
 
-// 3. Copy static asset folders (css, js, images)
+// 3. Copy static asset folders
 console.log('Copying static assets...');
-const assetFolders = ['css', 'js', 'images'];
-assetFolders.forEach(folder => {
-  const sourcePath = path.join(assetsDir, folder);
-  const destPath = path.join(outputDir, folder);
-  console.log(` -> Copying ${folder}...`);
-  copyDirectoryRecursive(sourcePath, destPath);
+config.assetFolders.forEach(folder => {
+    const sourcePath = path.join(config.assetsBaseDir, folder);
+    const destPath = path.join(config.outputDir, folder);
+    if (fs.existsSync(sourcePath)) { // Check if asset folder exists before copying
+        console.log(` -> Copying ${folder}...`);
+        copyDirectoryRecursive(sourcePath, destPath);
+    } else {
+        console.warn(` -> Asset folder ${folder} not found in ${config.assetsBaseDir}. Skipping.`);
+    }
 });
 console.log(' -> Static assets copied.');
 
 
-console.log('Processing HTML pages...');
+// 4. Process files in pages directory
+console.log(`Processing pages from ${config.pagesDir}...`);
 try {
-  const files = fs.readdirSync(pagesDir);
+    const files = fs.readdirSync(config.pagesDir);
 
-  files.forEach(file => {
-    // Process only .html files
-    if (path.extname(file) === '.html') {
-      const inputFilePath = path.join(pagesDir, file);
-      const outputFilePath = path.join(outputDir, file); // Output directly into dist
+    files.forEach(file => {
+        const inputFilePath = path.join(config.pagesDir, file);
+        const outputFilePath = path.join(config.outputDir, file); // Output directly into dist
 
-      console.log(`Processing ${inputFilePath}...`);
+        // Check if it's a file before processing
+        if (fs.statSync(inputFilePath).isFile()) {
+            // Process only .html files
+            if (path.extname(file) === '.html') {
+                console.log(`Processing ${inputFilePath}...`);
+                try {
+                    // Read the source HTML file
+                    const htmlContent = fs.readFileSync(inputFilePath, 'utf8');
 
-      // Read the source HTML file
-      const htmlContent = fs.readFileSync(inputFilePath, 'utf8');
+                    // Process includes and variables, passing the components directory path
+                    const processedHtml = processIncludes(htmlContent, config.componentsDir);
 
-      // Process includes and variables, passing the components directory path
-      const processedHtml = processIncludes(htmlContent, componentsDir);
+                    // Write the processed HTML to the output directory
+                    fs.writeFileSync(outputFilePath, processedHtml, 'utf8');
+                    console.log(` -> Output written to ${outputFilePath}`);
 
-      // Write the processed HTML to the output directory
-      fs.writeFileSync(outputFilePath, processedHtml, 'utf8');
+                } catch (writeErr) {
+                    console.error(`Error writing file ${outputFilePath}: ${writeErr.message}`);
+                }
 
-      console.log(` -> Output written to ${outputFilePath}`);
-    } else {
-      console.log(`Skipping non-html file: ${file}`);
-    }
-  });
+            } else {
+                // Copy non-HTML files directly
+                console.log(`Copying non-HTML file: ${file}...`);
+                try {
+                    fs.copyFileSync(inputFilePath, outputFilePath);
+                    console.log(` -> Copied to ${outputFilePath}`);
+                } catch (copyErr) {
+                    console.error(`Error copying file ${inputFilePath} to ${outputFilePath}: ${copyErr.message}`);
+                }
+            }
+        } else {
+             console.log(`Skipping directory: ${file}`); // Skip subdirectories within pages
+        }
+    });
 
-  console.log('\nBuild completed successfully!');
+    const endTime = performance.now(); // End timer
+    const duration = ((endTime - startTime) / 1000).toFixed(2); // Calculate duration in seconds
+
+    console.log(`\nBuild completed successfully in ${duration} seconds!`);
 
 } catch (err) {
-  console.error(`Error reading pages directory ${pagesDir}: ${err.message}`);
-  process.exit(1); // Exit script with error status
+    console.error(`Error reading pages directory ${config.pagesDir}: ${err.message}`);
+    process.exit(1); // Exit script with error status
 }
